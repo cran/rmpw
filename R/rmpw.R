@@ -1,3 +1,37 @@
+#' NEWWS Riverside data
+#' 
+#' The National Evaluation of Welfare-to-Work Strategies (NEWWS) Riverside study. 
+#' Immediately preceding the welfare reform
+#' nationwide in the mid-1990s, welfare applicants in Riverside, California, were
+#' assigned at random to either a labor force attachment (LFA) program (Z = 1) or
+#' a control condition (Z = 0) in an experimental study. The LFA program, with the
+#' goal of eventually weaning participants from the welfare system, emphasized
+#' seeking and securing employment, offered job search services, and provided
+#' incentives including a threat of sanctions should one fail to meet the program
+#' requirements, while the control group members were guaranteed cash assistance
+#' without the requirement for employment.
+#' 
+#' @docType data
+#' @name Riverside
+#' @return A list containing
+#' \item{trunc_dep12sm2}{Outcome. Maternal depression among participants at the end of two years after treatment.}
+#' \item{emp}{Mediator. A binary indicator for whether one was employed in any quarter during the 2 years after randomization.}
+#' \item{treat}{Treatment}
+#' \item{emp_prior}{Mediator}
+#' \item{pqtrunc25}{Preference for taking care of family full time rather than working}
+#' \item{pqtrunc30}{Too many family problems for full-time or part-time job}
+#' \item{pqtrunc49}{Cannot go school training due to too much to do}
+#' \item{pqtrunc50}{Sad past week}
+#' \item{pqtrunc51}{Depressed past week}
+#' \item{pqtrunc52}{Blues past week}
+#' \item{pqtrunc53}{Lonely past week}
+#' \item{hispanic}{Hispanic = 1; otherwise = 0}
+#' \item{nevmar}{Never married = 1; otherwise = 0}
+#' \item{nohsdip}{No high school diploma or GED = 1; otherwise = 0}
+#' \item{AFDC3660}{On AFDC 36 of past 60 months = 1; otherwise = 0}
+#' \item{AFDC0_Y1}{Ever in a situation of not receiving welfare during the first year after randomization = 1; otherwise = 0}
+NULL
+
 #' Causal Mediation Analysis Using Weighting Approach
 #'
 #' @param data The data set for analysis.
@@ -11,7 +45,7 @@
 #' @author Xu Qin and Guanglei Hong
 #' @references Hong, G., Deutsch, J., & Hill, H. D. (2015). Ratio-of-mediator-probability weighting for causal mediation analysis in the presence of treatment-by-mediator interaction. Journal of Educational and Behavioral Statistics, 40 (3), 307-340. \doi{10.3102/1076998615583902}
 #' @export
-#' @importFrom stats as.formula binomial coef fitted glm lm pnorm predict
+#' @importFrom stats as.formula binomial coef fitted glm lm pnorm predict model.matrix
 #' @examples 
 #' data(Riverside)
 #' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), decomposition = 0)
@@ -19,6 +53,27 @@
 #' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), decomposition = 2)
 
 rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, decomposition){
+  # Factorize categorical covariates (with fewer than 10 categories)
+  transform = function(X){
+    for(i in 1:length(X)){
+      if(length(unique(data[, X[i]])) > 2 & length(unique(data[, X[i]])) < 10){
+        data[, X[i]] = as.factor(data[, X[i]])
+      }
+    }
+    covariates = model.matrix(as.formula(paste("~", paste(X, collapse = "+"))), data)
+    X = colnames(covariates)
+    return(list(covariates = covariates[, -1], X = X[-1]))
+  }
+  transform.propensity_x = transform(propensity_x)
+  transform.outcome_x = transform(outcome_x)
+  data = data[, -which(colnames(data) %in% unique(c(propensity_x, outcome_x)))]
+  propensity_x = transform.propensity_x$X
+  outcome_x = transform.outcome_x$X
+  covariates = cbind(transform.propensity_x$covariates, transform.outcome_x$covariates)
+  colnames(covariates) = c(propensity_x, outcome_x)
+  data = cbind(data, covariates)
+  data = data[, colnames(unique(as.matrix(data), MARGIN = 2))] 
+  
   if(decomposition == 0){
     weight0 = function(m, t, X, data){
       data1 = data[which(data[, t] ==1), ]
@@ -531,7 +586,7 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
 #' @author Xu Qin, Guanglei Hong, and Fan Yang
 #' @references Hong, G., Qin, X., & Yang, F. (in press). Weighting-based sensitivity analysis in causal mediation studies. Journal of Educational and Behavioral Statistics. \doi{10.3102/1076998617749561}
 #' @export
-#' @importFrom stats as.formula binomial coef fitted glm lm pnorm predict cor sd
+#' @importFrom stats as.formula binomial coef fitted glm lm pnorm predict cor sd model.matrix
 #' @importFrom MASS polr
 #' @importFrom gtools combinations
 #' @examples 
@@ -544,6 +599,57 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
   y = outcome
   z.rand = t.rand
   z.confound = t.confound
+  data.ori = data
+  
+  # Factorize categorical covariates (with fewer than 10 categories)
+  transform = function(X, data){
+    for(i in 1:length(X)){
+      if(length(unique(data[, X[i]])) > 2 & length(unique(data[, X[i]])) < 10){
+        data[, X[i]] = as.factor(data[, X[i]])
+      }
+    }
+    covariates = model.matrix(as.formula(paste("~", paste(X, collapse = "+"))), data)
+    X = colnames(covariates)
+    return(list(covariates = covariates[, -1], X = X[-1]))
+  }
+
+  transform.X = transform(X, data.ori)
+  data = data[, -which(colnames(data) %in% X)]
+  covariates = transform.X$covariates
+  X = transform.X$X
+  data = cbind(data, covariates)
+  colnames(data)[(ncol(data) - length(X) + 1):ncol(data)] = X
+  data = data[, colnames(unique(as.matrix(data), MARGIN = 2))]
+  
+  if(!is.null(X.omit.pre)){
+    transform.X.omit.pre = transform(X.omit.pre, data.ori)
+    data = data[, -which(colnames(data) %in% X.omit.pre)]
+    covariates = transform.X.omit.pre$covariates
+    X.omit.pre = transform.X.omit.pre$X
+    data = cbind(data, covariates)
+    colnames(data)[(ncol(data) - length(X.omit.pre) + 1):ncol(data)] = X.omit.pre
+    data = data[, colnames(unique(as.matrix(data), MARGIN = 2))]
+  }
+  
+  if(!is.null(X.omit.post)){
+    transform.X.omit.post = transform(X.omit.post, data.ori)
+    data = data[, -which(colnames(data) %in% X.omit.post)]
+    covariates = transform.X.omit.post$covariates
+    X.omit.post = transform.X.omit.post$X
+    data = cbind(data, covariates)
+    colnames(data)[(ncol(data) - length(X.omit.post) + 1):ncol(data)] = X.omit.post
+    data = data[, colnames(unique(as.matrix(data), MARGIN = 2))]
+  }
+  
+  if(!is.null(X.unmeasure.pre)){
+    transform.X.unmeasure.pre = transform(X.unmeasure.pre, data.ori)
+    data = data[, -which(colnames(data) %in% X.unmeasure.pre)]
+    covariates = transform.X.unmeasure.pre$covariates
+    X.unmeasure.pre = transform.X.unmeasure.pre$X
+    data = cbind(data, covariates)
+    colnames(data)[(ncol(data) - length(X.unmeasure.pre) + 1):ncol(data)] = X.unmeasure.pre
+    data = data[, colnames(unique(as.matrix(data), MARGIN = 2))]
+  }
   
   weight = function(m, z, X, X.omit.pre = NULL, X.omit.post = NULL, m.scale, z.rand = TRUE, z.confound = FALSE, data){
     # If an omitted covariate is specified, we combine this covariate and other observed  

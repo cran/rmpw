@@ -1,6 +1,6 @@
 Package: rmpw
-Version: 0.0.3
-Date: 2018-1-02
+Version: 0.0.4
+Date: 2018-07-18
 Title: Causal Mediation Analysis Using Weighting Approach
 Author: Xu Qin, Guanglei Hong, and Fan Yang
 Maintainer: Xu Qin <xuqin@uchicago.edu>
@@ -9,6 +9,6 @@ Description: We implement causal mediation analysis using the methods proposed b
 License: GPL-2
 RoxygenNote: 6.0.1
 NeedsCompilation: no
-Packaged: 2018-01-04 13:51:02 UTC; Xu Qin
+Packaged: 2018-07-18 13:23:20 UTC; Xu Qin
 Repository: CRAN
-Date/Publication: 2018-01-04 15:44:35 UTC
+Date/Publication: 2018-07-18 13:40:03 UTC

@@ -1,9 +1,9 @@
-d852adf5d2a919fa5645636d633d3a47 *DESCRIPTION
-d0ac9f346ad9ac68618acb6745ef55a3 *NAMESPACE
-43de97a4847da24204cc0a0fbad23d02 *R/rmpw.R
-1af7548b4404f592aad9d032b8a26ae0 *build/partial.rdb
+a2ed9fd8654b71318dfa8b9d5cfa73de *DESCRIPTION
+5b22b57fb6f06dc3a225be5552ecef11 *NAMESPACE
+1386bc44fe04c09d4f19253f75b8f38f *R/rmpw.R
+1e329b6421562134ab44404af9c0a953 *build/partial.rdb
 aa6bcaaef9dd24396fb9e3a830385b01 *data/Riverside.rda
-7c64dc07479ce09d5cc1eee866fe33f1 *man/Riverside.Rd
+168977dd5b059b9c5465d62bc67bfc19 *man/Riverside.Rd
 b599bd5cd49b436d2a132e8c32874739 *man/rmpw.Rd
 b3c52afe7791c0dff1eac5902d6adfda *man/sensitivity.Rd
 9de5c066f63831631f51f0037e020b59 *man/sensitivity.plot.Rd
