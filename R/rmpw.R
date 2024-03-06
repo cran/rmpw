@@ -38,7 +38,7 @@ NULL
 #' @param treatment The name of the treatment variable (string).
 #' @param mediator The name of the mediator variable (string).
 #' @param outcome The name of the outcome variable (string).
-#' @param propensity_x A vector of variable names (string) of pretreatment confounders, which will be included in the propensity score model. 
+#' @param propensity_x A vector of variable names (string) of pretreatment confounders, which will be included in the propensity score model. To reduce the risk of model misspecifications, we account for the interaction between the treatment and each observed pretreatment covariate in the propensity score model.
 #' @param outcome_x A vector of variable names (string) of pretreatment confounders, which will be included in the outcome model. 
 #' @param decomposition Type of decomposition. When decomposition = 1, the total treatment effect will be decomposed into pure direct effect (DE.0), total and pure indirect effect (IE.1 and IE.0), and natural treatment-by-mediator interaction effect (IE.1 - IE.0). When decomposition = 2, the total treatment effect will be decomposed into pure indirect effect (IE.0), total and pure direct effect (DE.1 and DE.0), and natural treatment-by-mediator interaction effect (DE.1 - DE.0).
 #' @return A list contains the estimates of the causal effects and the coefficients of the pretreatment covariates.
@@ -103,67 +103,101 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
     #### Direct and Indirect Effect Estimation
     est = function(y, m, t, X, data) {
       data = weight0(m, t, X, data)
-      n = nrow(data)
-      data = data[order(data[, t], decreasing = T), ]
-      muAlpha = data$p0
-      muBeta = data$p1
-      #for anything related to propensity model estimation, will need to use the orginal muAlpha, muBeta
-      muAlphaOrig = muAlpha
-      muBetaOrig = muBeta
-      x = matrix(1, n, 1) 
-      x = cbind(x, as.matrix(data[, X]))
-      nP = ncol(x)
-      dimnames(x)[[2]] <- c( "1", X)
-      alphaVar = (muAlphaOrig * (1 - muAlphaOrig))
-      betaVar =  (muBetaOrig * (1 - muBetaOrig))
-      alphaResidue = (data[, m] - muAlphaOrig) * (data[, t] == 0)
-      betaResidue = (data[, m] - muBetaOrig) * (data[, t] == 1)
+      p = NULL
+      p[which(data[, t] ==1)] = data$p1[which(data[, t] ==1)]
+      p[which(data[, t] ==0)] = data$p0[which(data[, t] ==0)]
+      X0.matrix = X1.matrix = X.matrix = as.matrix(cbind(1, data[, X]))
+      h1 = X.matrix * as.vector((data[, m] - p))
+      G11 = t(X.matrix) %*% diag(as.vector(p * (1 - p))) %*% X.matrix
+      data_ctrl = data[data[, t] == 0, ]
+      data_tr = data[data[, t] == 1, ]
+      data_tr_dup = NULL
+      for (j in 1:ncol(data_tr)) {
+        data_tr_dup = cbind(data_tr_dup, rep(data_tr[, j], rep(2, nrow(data_tr))))
+      }
+      colnames(data_tr_dup) = colnames(data_ctrl)
+      data_tr_dup = as.data.frame(data_tr_dup)
+      data_tr_dup$rmpw[seq(2, length(data_tr_dup[, 1]), 2)] = 1
+      d1 = c(rep(c(0, 1), nrow(data_tr)), rep(0, length(data_ctrl[, 1])))
+      data_dup = cbind.data.frame(d1, rbind(data_tr_dup, data_ctrl))
       
-      G11 = matrix(0, 2 * nP, 2 * nP)
-      G11_Alpha = t(x) %*% diag(alphaVar * (data[, t] == 0)) %*% x
-      G11_Beta = t(x) %*% diag(betaVar * (data[, t]==1)) %*% x
-      G11[1:nP, 1:nP] = G11_Alpha
-      G11[(nP+1):(2*nP), (nP+1):(2*nP)] = G11_Beta
+      z = model.matrix(lm(as.formula(paste(m, "~", t, "+ d1 +", paste(X, collapse="+"))), data = data_dup))
+      w = diag(data_dup$rmpw)
+      l.y = lm(as.formula(paste(y, "~", t, "+ d1 +", paste(X, collapse = "+"))), data = data_dup, weights = rmpw)
+      beta = coef(l.y)
+      delta = beta[1]
+      delta_counter = beta[1] + beta[2]
+      delta_e = beta[1] + beta[2] + beta[3]
+      lamda = beta[4:(length(beta))]
+      x.outcome = as.matrix(data[, X]) # x in the outcome model. It will be used in the moment function. 
+      
+      n = nrow(data)
+      outcome = as.matrix(data[,c(y, y, y)])
+      outcome = matrix(0, n, 3)  
+      outcome[,1] = data[, y]
+      outcome[,3] = data[, y]
+      outcome[,2] = data[, y]
+      dimnames(outcome)[[2]] <- c( "delta","delta_*","delta_e")
       
       w = matrix(0, n, 3)
       w[,1] = (data[, t] == 0)
       w[,3] = (data[, t] == 1)
-      w[,2] = (data[, t] == 1) * data$rmpw
-      deltaEstimate = NULL
+      w[,2] = (data[, t] == 1)*data$rmpw
+      dimnames(w)[[2]] <- c( "delta","delta_*","delta_e")
+      
+      deltaEstimate = c(delta, delta_counter, delta_e)
       wSum = NULL
-      hDelta = NULL 
+      hDelta = NULL #score function for delta, delta^*, delta^3  
       for (j in 1:3){
-        delta = sum(data[, y] * w[,j])/sum(w[, j])    
-        hDelta = cbind(hDelta, (data[, y] - delta) * w[, j])
-        deltaEstimate = cbind(deltaEstimate, delta)
-        wSum = cbind(wSum, sum(w[, j]))
-      }
-      hAlphaBeta = cbind(x * (alphaResidue), x * (betaResidue))
-      hCombined = cbind(hAlphaBeta, hDelta);
-      B0 = t(hCombined) %*% hCombined
+        delta = deltaEstimate[j]    
+        hDelta = cbind(hDelta, (outcome[,j] - x.outcome %*% lamda - delta)*w[,j])
+        wSum = cbind(wSum, sum(w[,j]))
+      }  
+      dimnames(wSum)[[2]] <- c( "delta","delta_*","delta_e")
       G22 = diag(as.numeric(wSum))
+      dimnames(hDelta)[[2]] <- c( "delta","delta_*","delta_e")
+      hX = (hDelta[ ,1] + hDelta[ ,2] + hDelta[ ,3]) * x.outcome
+      hCombined = cbind(h1, hDelta, hX)
+      B0 = t(hCombined)%*%hCombined
       
-      dWi_dAlpha_noX = ((data[, t] == 1) * muAlpha * (1-muAlpha) * (data[, m]/muBeta - (1-data[, m])/(1-muBeta))) 
-      dWi_dBeta_noX = ((data[, t] == 1) * (-data[, m] * muAlpha * (1 - muBeta)/muBeta + (1 - data[, m]) * (1 - muAlpha) * muBeta/(1 - muBeta))) 
-      dhDelta_dAlpha = (-dWi_dAlpha_noX * (data[, y] - deltaEstimate[2])) * x
-      dhDelta_dBeta = (-dWi_dBeta_noX * (data[, y] - deltaEstimate[2])) * x
-      G12 = matrix(0, 3, 2 * nP)
-      for (j in 1:nP) {
-        G12[2, j] = sum(dhDelta_dAlpha[, j])
-        G12[2, j + nP] = sum(dhDelta_dBeta[, j])
+      #we calculate G21 matrix
+      
+      dp0_dbeta = as.vector(data$p0 * (1 - data$p0)) * X0.matrix
+      dp1_dbeta = as.vector(data$p1 * (1 - data$p1)) * X1.matrix
+      dw_dbeta = data[, m] * (dp0_dbeta * as.vector(data$p1) - as.vector(data$p0) * dp1_dbeta)/(as.vector(data$p1) ^ 2) + (1 - data[, m]) * (-dp0_dbeta * (1 - as.vector(data$p1)) + (1 - as.vector(data$p0)) * dp1_dbeta)/((1 - as.vector(data$p1)) ^ 2)
+      dh.star_dbeta = -(data[, y] - as.numeric(x.outcome %*% lamda) - deltaEstimate[2]) * data[, t] * dw_dbeta
+      nP = ncol(X.matrix)
+      G21 = matrix(0, 3, nP)
+      for(j in 1:ncol(G21)){
+        G21[2, j] = sum(dh.star_dbeta[, j])
       }
       
-      A0 = matrix(0, (nP * 2 + 3), (nP * 2 + 3))
-      A0[(2 * nP + 1):(2 * nP + 3), (2 * nP + 1):(2 * nP + 3)] = G22
-      A0[1:(2 * nP), 1:(2 * nP)] = G11
-      A0[(2 * nP + 1):(2 * nP + 3), 1:(2 * nP)] = G12
+      G23 = matrix(0, 3, length(lamda))
+      G23[1, ] = apply((1 - data[, t]) * x.outcome, 2, sum)
+      G23[2, ] = apply(data[, t] * w[, 2] * x.outcome, 2, sum)
+      G23[3, ] = apply(data[, t] * x.outcome, 2, sum)
+      G32 = t(G23)
+      
+      G31 = t(x.outcome) %*% diag(-data[, t] * (data[, y] -  as.numeric(x.outcome %*% lamda) - deltaEstimate[2])) %*% dw_dbeta
+      
+      G33 = t(x.outcome) %*% diag(1 + data[, t] * w[, 2]) %*% x.outcome
+      
+      A0 = matrix(0, (nP+3+ncol(x.outcome)), (nP+3+ncol(x.outcome)))
+      A0[(nP+1):(nP+3), (nP+1):(nP+3)] = G22
+      A0[1:(nP), 1:(nP)] = G11
+      A0[(nP+1):(nP+3), 1:(nP)] = G21
+      A0[(nP+3+1):(nP+3+ncol(x.outcome)), 1:(nP)] = G31
+      A0[(nP+3+1):(nP+3+ncol(x.outcome)), (nP+1):(nP+3)] = G32
+      A0[(nP+3+1):(nP+3+ncol(x.outcome)), (nP+3+1):(nP+3+ncol(x.outcome))] = G33
+      A0[(nP+1):(nP+3), (nP+3+1):(nP+3+ncol(x.outcome))] = G23
       
       v_hw = solve(A0) %*% B0 %*% t(solve(A0))
-      v_hw_ctrl_counterfacal_tr = v_hw[(2 * nP + 1):(2 * nP + 3), (2 * nP + 1):(2 * nP + 3)]  
-      de = deltaEstimate[2] - deltaEstimate[1]
-      ie = deltaEstimate[3] - deltaEstimate[2]
-      se_de = sqrt(v_hw_ctrl_counterfacal_tr[2, 2] + v_hw_ctrl_counterfacal_tr[1, 1] - 2 * v_hw_ctrl_counterfacal_tr[1, 2])
-      se_ie = sqrt(v_hw_ctrl_counterfacal_tr[3, 3] + v_hw_ctrl_counterfacal_tr[2, 2] - 2 * v_hw_ctrl_counterfacal_tr[2, 3])
+      
+      v_hw_ctrl_counterfacal_tr = v_hw[(nP+1):(nP+3), (nP+1):(nP+3)]  
+      de = as.numeric(deltaEstimate[2] - deltaEstimate[1])
+      ie = as.numeric(deltaEstimate[3] - deltaEstimate[2])
+      se_de = sqrt(v_hw_ctrl_counterfacal_tr[2,2]+v_hw_ctrl_counterfacal_tr[1,1] - 2*v_hw_ctrl_counterfacal_tr[1,2])
+      se_ie = sqrt(v_hw_ctrl_counterfacal_tr[3,3]+v_hw_ctrl_counterfacal_tr[2,2] - 2*v_hw_ctrl_counterfacal_tr[2,3])
       
       results = c(de = de, ie = ie, se_de = se_de, se_ie = se_ie, CIL_de = de - 1.96 * se_de, CIU_de = de + 1.96 * se_de, CIL_ie = ie - 1.96 * se_ie, CIU_ie = ie + 1.96 * se_ie)
       

@@ -28,24 +28,21 @@ Causal Mediation Analysis Using Weighting Approach
 }
 \examples{
 data(Riverside)
-rmpw(data = Riverside, treatment = "treat", mediator = "emp", 
-    outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), decomposition = 0)
-rmpw(data = Riverside, treatment = "treat", mediator = "emp", 
-    outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), decomposition = 1)
-rmpw(data = Riverside, treatment = "treat", mediator = "emp", 
-    outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", 
-        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", 
-        "hispanic", "pqtrunc49", "nevmar"), decomposition = 2)
+rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2",
+    propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53",
+        "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior",
+        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic",
+        "pqtrunc49", "nevmar"), decomposition = 0)
+rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2",
+    propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53",
+        "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior",
+        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic",
+        "pqtrunc49", "nevmar"), decomposition = 1)
+rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2",
+    propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53",
+        "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior",
+        "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic",
+        "pqtrunc49", "nevmar"), decomposition = 2)
 }
 \references{
 Hong, G., Deutsch, J., & Hill, H. D. (2015). Ratio-of-mediator-probability weighting for causal mediation analysis in the presence of treatment-by-mediator interaction. Journal of Educational and Behavioral Statistics, 40 (3), 307-340. \doi{10.3102/1076998615583902}
