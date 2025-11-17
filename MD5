@@ -1,7 +1,7 @@
-6cd998e29d2850ecf10ecfb049949341 *DESCRIPTION
+cddd2149f2436893f284578ffdee589c *DESCRIPTION
 5b22b57fb6f06dc3a225be5552ecef11 *NAMESPACE
-97f16590804268c9b936d0906bd8ec75 *R/rmpw.R
-cb4924f3573383fca290a0a8e2ca5294 *build/partial.rdb
+5a49debd4a1ddc46e783578b593970b1 *R/rmpw.R
+d54042561b90aafd8a9a202ea63e1e4b *build/partial.rdb
 aa6bcaaef9dd24396fb9e3a830385b01 *data/Riverside.rda
 168977dd5b059b9c5465d62bc67bfc19 *man/Riverside.Rd
 d6c45857ca233f6907e50ac7cc42e379 *man/rmpw.Rd
