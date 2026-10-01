@@ -16,6 +16,8 @@
 #' @return A list containing
 #' \item{trunc_dep12sm2}{Outcome. Maternal depression among participants at the end of two years after treatment.}
 #' \item{emp}{Mediator. A binary indicator for whether one was employed in any quarter during the 2 years after randomization.}
+#' \item{emp_cat}{Mediator. A categorical variable for one's employment during the 2 years after randomization.}
+#' \item{emp_cont}{Mediator. A continuous variable for the number of quarters one was employed during the 2 years after randomization.}
 #' \item{treat}{Treatment}
 #' \item{emp_prior}{Mediator}
 #' \item{pqtrunc25}{Preference for taking care of family full time rather than working}
@@ -40,19 +42,21 @@ NULL
 #' @param outcome The name of the outcome variable (string).
 #' @param propensity_x A vector of variable names (string) of pretreatment confounders, which will be included in the propensity score model. To reduce the risk of model misspecifications, we account for the interaction between the treatment and each observed pretreatment covariate in the propensity score model.
 #' @param outcome_x A vector of variable names (string) of pretreatment confounders, which will be included in the outcome model. 
-#' @param decomposition Type of decomposition. When decomposition = 0, the total treatment effect will be decomposed into natural direct effect and natural indirect effect. When decomposition = 1, the total treatment effect will be decomposed into pure direct effect (DE.0), total and pure indirect effect (IE.1 and IE.0), and natural treatment-by-mediator interaction effect (IE.1 - IE.0). When decomposition = 2, the total treatment effect will be decomposed into pure indirect effect (IE.0), total and pure direct effect (DE.1 and DE.0), and natural treatment-by-mediator interaction effect (DE.1 - DE.0).
-#' @return A list contains the estimates of the causal effects and the coefficients of the pretreatment covariates.
+#' @param m.scale Scale of the mediator ("discrete" or "continuous").
+#' @param t.rand A logical value. If TRUE, treatment is randomized. If FALSE, treatment is not randomized. The default is TRUE.
+#' @return A list contains the estimation and inference results of the causal effects (including Natural Direct Effect, Natural Indirect Effect, Pure Indirect Effect, Total Direct Effect, and Natural Treatment-by-Mediator Interaction Effect) and the coefficients of the pretreatment covariates. When the mediator is binary, and the treatment is randomized, the ratio-of-mediator-probability weight (Hong et al., 2015) is used with closed-form standard errors that account for the estimation of the weights (Bein et al., 2018). Otherwise, the weight is constructed in the algebraically equivalent inverse-probability form of Huber (2014), which accommodates continuous and multi-valued discrete mediators, and standard errors and confidence intervals are obtained via bootstrapping.
 #' @author Xu Qin and Guanglei Hong
 #' @references Hong, G., Deutsch, J., & Hill, H. D. (2015). Ratio-of-mediator-probability weighting for causal mediation analysis in the presence of treatment-by-mediator interaction. Journal of Educational and Behavioral Statistics, 40 (3), 307-340. \doi{10.3102/1076998615583902}
 #' @export
-#' @importFrom stats as.formula binomial coef fitted glm lm pnorm predict model.matrix
+#' @importFrom boot stats as.formula binomial coef fitted glm lm pnorm predict model.matrix quantile
 #' @examples 
+#' \donttest{
 #' data(Riverside)
-#' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), decomposition = 0)
-#' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), decomposition = 1)
-#' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), decomposition = 2)
+#' rmpw(data = Riverside, treatment = "treat", mediator = "emp", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), m.scale = "discrete")
+#' rmpw(data = Riverside, treatment = "treat", mediator = "emp_cont", outcome = "trunc_dep12sm2", propensity_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), outcome_x = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), m.scale = "continuous")
+#' }
 
-rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, decomposition){
+rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, m.scale, t.rand = TRUE){
   # Factorize categorical covariates (with fewer than 10 categories)
   transform = function(X){
     for(i in 1:length(X)){
@@ -74,124 +78,8 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
   data = cbind(data, covariates)
   data = data[, colnames(unique(as.matrix(data), MARGIN = 2))] 
   
-  if(decomposition == 0){
-    weight0 = function(m, t, X, data){
-      data1 = data[which(data[, t] ==1), ]
-      data0 = data[which(data[, t] ==0), ]
-      formula = as.formula(paste(m, "~", paste(X, collapse="+")))
-      formula_x = as.formula(paste(t, "~", paste(X, collapse="+")))
-      l_x = glm(formula_x, data = data, family = binomial)
-      p1_x = fitted(l_x)
-      p0_x = 1 - p1_x
-      iptw1 = (sum(data[, t] == 1)/nrow(data))/p1_x
-      iptw0 = (sum(data[, t] == 0)/nrow(data))/p0_x
-      data$iptw[data[, t] == 1] = iptw1[data[, t] == 1] # For the use in the bias calculation when T is not randomized and X.omit is pretreatment
-      data$iptw[data[, t] == 0] = iptw0[data[, t] == 0]
-      l1 = glm(formula, data = data1, family = binomial)
-      l0 = glm(formula, data = data0, family = binomial)
-      p1 = predict(l1, data, type = "response")
-      p0 = predict(l0, data, type = "response")
-      data$rmpw[data[, t] == 1 & data[, m] == 1] = (p0/p1)[data[, t] == 1 & data[, m] == 1]
-      data$rmpw[data[, t] == 1 & data[, m] == 0] = ((1 - p0)/(1 - p1))[data[, t] == 1 & data[, m] == 0]
-      data$rmpw[data[, t] == 0] = 1
-      data$p1 = p1 # For the use in the function of "est"
-      data$p0 = p0
-      
-      return(data)
-    }
-    
-    #### Direct and Indirect Effect Estimation
-    est = function(y, m, t, X, data) {
-      data = weight0(m, t, X, data)
-      n = nrow(data)
-      data = data[order(data[, t], decreasing = T), ]
-      muAlpha = data$p0
-      muBeta = data$p1
-      #for anything related to propensity model estimation, will need to use the orginal muAlpha, muBeta
-      muAlphaOrig = muAlpha
-      muBetaOrig = muBeta
-      x = matrix(1, n, 1) 
-      x = cbind(x, as.matrix(data[, X]))
-      nP = ncol(x)
-      dimnames(x)[[2]] <- c( "1", X)
-      alphaVar = (muAlphaOrig * (1 - muAlphaOrig))
-      betaVar =  (muBetaOrig * (1 - muBetaOrig))
-      alphaResidue = (data[, m] - muAlphaOrig) * (data[, t] == 0)
-      betaResidue = (data[, m] - muBetaOrig) * (data[, t] == 1)
-      
-      G11 = matrix(0, 2 * nP, 2 * nP)
-      G11_Alpha = t(x) %*% diag(alphaVar * (data[, t] == 0)) %*% x
-      G11_Beta = t(x) %*% diag(betaVar * (data[, t]==1)) %*% x
-      G11[1:nP, 1:nP] = G11_Alpha
-      G11[(nP+1):(2*nP), (nP+1):(2*nP)] = G11_Beta
-      
-      w = matrix(0, n, 3)
-      w[,1] = (data[, t] == 0)
-      w[,3] = (data[, t] == 1)
-      w[,2] = (data[, t] == 1) * data$rmpw
-      deltaEstimate = NULL
-      wSum = NULL
-      hDelta = NULL 
-      for (j in 1:3){
-        delta = sum(data[, y] * w[,j])/sum(w[, j])    
-        hDelta = cbind(hDelta, (data[, y] - delta) * w[, j])
-        deltaEstimate = cbind(deltaEstimate, delta)
-        wSum = cbind(wSum, sum(w[, j]))
-      }
-      hAlphaBeta = cbind(x * (alphaResidue), x * (betaResidue))
-      hCombined = cbind(hAlphaBeta, hDelta);
-      B0 = t(hCombined) %*% hCombined
-      G22 = diag(as.numeric(wSum))
-      
-      dWi_dAlpha_noX = ((data[, t] == 1) * muAlpha * (1-muAlpha) * (data[, m]/muBeta - (1-data[, m])/(1-muBeta))) 
-      dWi_dBeta_noX = ((data[, t] == 1) * (-data[, m] * muAlpha * (1 - muBeta)/muBeta + (1 - data[, m]) * (1 - muAlpha) * muBeta/(1 - muBeta))) 
-      dhDelta_dAlpha = (-dWi_dAlpha_noX * (data[, y] - deltaEstimate[2])) * x
-      dhDelta_dBeta = (-dWi_dBeta_noX * (data[, y] - deltaEstimate[2])) * x
-      G12 = matrix(0, 3, 2 * nP)
-      for (j in 1:nP) {
-        G12[2, j] = sum(dhDelta_dAlpha[, j])
-        G12[2, j + nP] = sum(dhDelta_dBeta[, j])
-      }
-      
-      A0 = matrix(0, (nP * 2 + 3), (nP * 2 + 3))
-      A0[(2 * nP + 1):(2 * nP + 3), (2 * nP + 1):(2 * nP + 3)] = G22
-      A0[1:(2 * nP), 1:(2 * nP)] = G11
-      A0[(2 * nP + 1):(2 * nP + 3), 1:(2 * nP)] = G12
-      
-      v_hw = solve(A0) %*% B0 %*% t(solve(A0))
-      v_hw_ctrl_counterfacal_tr = v_hw[(2 * nP + 1):(2 * nP + 3), (2 * nP + 1):(2 * nP + 3)]  
-      de = deltaEstimate[2] - deltaEstimate[1]
-      ie = deltaEstimate[3] - deltaEstimate[2]
-      se_de = sqrt(v_hw_ctrl_counterfacal_tr[2, 2] + v_hw_ctrl_counterfacal_tr[1, 1] - 2 * v_hw_ctrl_counterfacal_tr[1, 2])
-      se_ie = sqrt(v_hw_ctrl_counterfacal_tr[3, 3] + v_hw_ctrl_counterfacal_tr[2, 2] - 2 * v_hw_ctrl_counterfacal_tr[2, 3])
-      
-      results = c(de = de, ie = ie, se_de = se_de, se_ie = se_ie, CIL_de = de - 1.96 * se_de, CIU_de = de + 1.96 * se_de, CIL_ie = ie - 1.96 * se_ie, CIU_ie = ie + 1.96 * se_ie)
-      
-      return(results)
-    }
-    
-    result_now = est(outcome, mediator, treatment, propensity_x, data)
-    result = cbind(c(result_now["de"], result_now["ie"]),c(result_now["se_de"], result_now["se_ie"]))
-    z = result[, 1]/result[, 2]
-    p = NULL
-    for(i in 1:nrow(result)){
-      p = c(p, (1 - pnorm(abs(z[i]))) * 2)
-    }
-    result = round(cbind(result, z, p), 4)
-    result[p < 0.001, 4] = "<0.001"
-    sig = NULL
-    sig[p <= 0.001] = "**"
-    sig[p > 0.001 & p <= 0.01] = "*"
-    sig[p > 0.01 & p <= 0.05] = "."
-    sig[p > 0.05] = ""
-    result = cbind(result, sig)
-    result = as.data.frame(result)
-    colnames(result) <- c("Estimate", "Std.Error", "t value", "Pr(>|t|)", "")
-    rownames(result) <- c("Natural Direct Effect", "Natural Indirect Effect")
-  }
-  
-  if(decomposition > 0){
-    weight1 = function(input_data, treatment, propensity_yx, decomposition = 1) {
+  if(m.scale == "discrete" & length(unique(data[, mediator])) == 2 & t.rand == TRUE){
+    weight_disc = function(input_data, treatment, propensity_yx) {
       data_tr = input_data[input_data[, treatment] == 1, ]
       data_ctrl = input_data[input_data[, treatment] == 0, ]
       
@@ -201,17 +89,15 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
       fmla <- as.formula(fmlaString);
       
       ##Estimated logit of propensity score
-      {
-        l_tr = glm(fmla, data = data_tr, family = binomial)
-        propensity_l_tr_data_tr = fitted(l_tr)
-        logit_l_tr_data_tr = log(propensity_l_tr_data_tr/(1 - propensity_l_tr_data_tr))
-        l_ctrl = glm(fmla, data = data_ctrl, family = binomial)
-        propensity_l_ctrl_data_ctrl = fitted(l_ctrl)
-        logit_l_ctrl_data_ctrl = log(propensity_l_ctrl_data_ctrl/(1 - propensity_l_ctrl_data_ctrl))
-        
-        logit_l_tr_data_ctrl = predict(l_tr, data_ctrl)
-        logit_l_ctrl_data_tr = predict(l_ctrl, data_tr)
-      }
+      l_tr = glm(fmla, data = data_tr, family = binomial)
+      propensity_l_tr_data_tr = fitted(l_tr)
+      logit_l_tr_data_tr = log(propensity_l_tr_data_tr/(1 - propensity_l_tr_data_tr))
+      l_ctrl = glm(fmla, data = data_ctrl, family = binomial)
+      propensity_l_ctrl_data_ctrl = fitted(l_ctrl)
+      logit_l_ctrl_data_ctrl = log(propensity_l_ctrl_data_ctrl/(1 - propensity_l_ctrl_data_ctrl))
+      
+      logit_l_tr_data_ctrl = predict(l_tr, data_ctrl)
+      logit_l_ctrl_data_tr = predict(l_ctrl, data_tr)
       
       logit_l_tr = c(logit_l_tr_data_tr, logit_l_tr_data_ctrl)
       logit_l_ctrl = c(logit_l_ctrl_data_tr, logit_l_ctrl_data_ctrl)
@@ -242,66 +128,32 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
       newdata.ctrl=newdata[which(newdata[, treatment]==0),]
       newdata.tr=newdata[which(newdata[, treatment]==1),]
       
-      if(decomposition == 1){
-        
-        d1_rmpw = c(rep(c(0,1),dim(newdata.tr)[1]),  rep(c(0, 0),dim(newdata.ctrl)[1]))
-        d0_rmpw = c(rep(c(0,0),dim(newdata.tr)[1]),  rep(c(0, 1),dim(newdata.ctrl)[1]))
-        
-        newdata.tr.dup=NULL
-        for(j in 1:dim(newdata.tr)[2]){
-          newdata.tr.dup=cbind(newdata.tr.dup,rep(newdata.tr[,j],rep(2,dim(newdata.tr)[1])))
-        }
-        colnames(newdata.tr.dup)=colnames(newdata.ctrl)
-        newdata.tr.dup=as.data.frame(newdata.tr.dup)
-        newdata.tr.dup$rmpw[seq(2,length(newdata.tr.dup[,1]),2)]=1
-        
-        newdata.ctrl.dup=NULL
-        for(j in 1:dim(newdata.ctrl)[2]){
-          newdata.ctrl.dup=cbind(newdata.ctrl.dup,rep(newdata.ctrl[,j],rep(2,dim(newdata.ctrl)[1])))
-        }
-        colnames(newdata.ctrl.dup)=colnames(newdata.ctrl)
-        newdata.ctrl.dup=as.data.frame(newdata.ctrl.dup)
-        newdata.ctrl.dup$rmpw[seq(1,length(newdata.ctrl.dup[,1]),2)]=1
-        
-        data_dup=cbind(d1_rmpw,d0_rmpw, rbind(newdata.tr.dup,newdata.ctrl.dup))  
-        result = list(data_dup= data_dup, data_nodup = data_nodup)
-      } else {
-        
-        d1_rmpw = c(rep(c(0,1),dim(newdata.tr)[1]),  rep(c(0, 0),dim(newdata.ctrl)[1]))
-        d0_rmpw = c(rep(c(1,0),dim(newdata.tr)[1]),  rep(c(0, 1),dim(newdata.ctrl)[1]))
-        
-        newdata.tr.dup=NULL
-        for(j in 1:dim(newdata.tr)[2]){
-          newdata.tr.dup=cbind(newdata.tr.dup,rep(newdata.tr[,j],rep(2,dim(newdata.tr)[1])))
-        }
-        colnames(newdata.tr.dup)=colnames(newdata.ctrl)
-        newdata.tr.dup=as.data.frame(newdata.tr.dup)
-        newdata.tr.dup$rmpw[seq(1,length(newdata.tr.dup[,1]),2)]=1
-        
-        newdata.ctrl.dup=NULL
-        for(j in 1:dim(newdata.ctrl)[2]){
-          newdata.ctrl.dup=cbind(newdata.ctrl.dup,rep(newdata.ctrl[,j],rep(2,dim(newdata.ctrl)[1])))
-        }
-        colnames(newdata.ctrl.dup)=colnames(newdata.ctrl)
-        newdata.ctrl.dup=as.data.frame(newdata.ctrl.dup)
-        newdata.ctrl.dup$rmpw[seq(1,length(newdata.ctrl.dup[,1]),2)]=1
-        
-        data_dup=cbind(d1_rmpw,d0_rmpw, rbind(newdata.tr.dup,newdata.ctrl.dup))
-        
-        #add two intermediate variable
-        data_dup$trd0_rmpw = data_dup[, treatment]*data_dup$d0_rmpw
-        data_dup$trd1_rmpw = data_dup[, treatment]*data_dup$d1_rmpw
-        
-        result = list(data_dup= data_dup, data_nodup = data_nodup)    
+      d1_rmpw = c(rep(c(0,1),dim(newdata.tr)[1]),  rep(c(0, 0),dim(newdata.ctrl)[1]))
+      d0_rmpw = c(rep(c(0,0),dim(newdata.tr)[1]),  rep(c(0, 1),dim(newdata.ctrl)[1]))
+      
+      newdata.tr.dup=NULL
+      for(j in 1:dim(newdata.tr)[2]){
+        newdata.tr.dup=cbind(newdata.tr.dup,rep(newdata.tr[,j],rep(2,dim(newdata.tr)[1])))
       }
+      colnames(newdata.tr.dup)=colnames(newdata.ctrl)
+      newdata.tr.dup=as.data.frame(newdata.tr.dup)
+      newdata.tr.dup$rmpw[seq(2,length(newdata.tr.dup[,1]),2)]=1
+      
+      newdata.ctrl.dup=NULL
+      for(j in 1:dim(newdata.ctrl)[2]){
+        newdata.ctrl.dup=cbind(newdata.ctrl.dup,rep(newdata.ctrl[,j],rep(2,dim(newdata.ctrl)[1])))
+      }
+      colnames(newdata.ctrl.dup)=colnames(newdata.ctrl)
+      newdata.ctrl.dup=as.data.frame(newdata.ctrl.dup)
+      newdata.ctrl.dup$rmpw[seq(1,length(newdata.ctrl.dup[,1]),2)]=1
+      
+      data_dup=cbind(d1_rmpw,d0_rmpw, rbind(newdata.tr.dup,newdata.ctrl.dup))  
+      result = list(data_dup= data_dup, data_nodup = data_nodup)
       
       return(result)
     }
     
-    
-    est_rmpw = function(data_dup, data_nodup, treatment, outcome_yx, propensity_yx, decomposition = 1) {
-      
-      
+    est_rmpw = function(data_dup, data_nodup, treatment, outcome_yx, propensity_yx) {
       #at first we estimate the parameters
       
       fmlaString = paste(outcome_yx[1], "~", paste(outcome_yx[2:length(outcome_yx)], collapse="+"))
@@ -354,27 +206,11 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
       gamma_DE.0 = beta[2]
       gamma_IE.1 = beta[3]
       gamma_IE.0 = beta[4]
+      gamma_DE.1 = gamma_DE.0 + (gamma_IE.1 - gamma_IE.0)
       
-      if(decomposition == 1) {
-        gamma_DE.0 = beta[2]
-        gamma_IE.1 = beta[3]
-        gamma_IE.0 = beta[4]
-        
-        #will define mean of the four groups under frist decomposition method
-        gamma_star.0 = gamma_0 + gamma_IE.0
-        gamma_star.1 = gamma_0 + gamma_DE.0
-        gamma_1 = gamma_0 + gamma_DE.0 + gamma_IE.1
-      } else {
-        
-        gamma_IE.0 = beta[2]
-        gamma_DE.1 = beta[3]
-        gamma_DE.0 = beta[4]
-        
-        #will define mean of the four groups under frist decomposition method
-        gamma_star.0 = gamma_0 + gamma_IE.0
-        gamma_star.1 = gamma_0 + gamma_DE.0
-        gamma_1 = gamma_0 + gamma_IE.0 + gamma_DE.1
-      }
+      gamma_star.0 = gamma_0 + gamma_IE.0
+      gamma_star.1 = gamma_0 + gamma_DE.0
+      gamma_1 = gamma_0 + gamma_DE.0 + gamma_IE.1
       
       gammaEstimate = cbind(gamma_0, gamma_star.0, gamma_star.1, gamma_1)
       dimnames(gammaEstimate)[[2]] <- c( "gamma_0","gamma_*0", "gamma_*1","gamma_1")
@@ -488,23 +324,14 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
       #covariance matrix for ( "gamma_0","gamma_*0", "gamma_*1","gamma_1")
       C22 = CMatrix[(2*nM+1):(2*nM+nG), (2*nM+1):(2*nM+nG)]
       
-      if(decomposition == 1) {
-        #from C22 we will calculate the covariance matrix between (gamma_0, DE.0, IE.1, IE0, and IE.1-IE.0)
-        convertMatrix = matrix(0, nG, nG+1)  
-        convertMatrix[,1] = c(1, 0, 0, 0)
-        convertMatrix[,2] = c(-1, 0, 1, 0)
-        convertMatrix[,3] = c(0, 0, -1, 1)
-        convertMatrix[,4] = c(-1, 1, 0, 0)
-        convertMatrix[,5] = c(1, -1, -1, 1)
-      } else {
-        #from C22 we will calculate the covariance matrix between (gamma_0, IE.0, DE.1, DE0, and DE.1-DE.0)
-        convertMatrix = matrix(0, nG, nG+1)  
-        convertMatrix[,1] = c(1, 0, 0, 0)
-        convertMatrix[,2] = c(-1, 1, 0, 0)
-        convertMatrix[,3] = c(0, -1, 0, 1)
-        convertMatrix[,4] = c(-1, 0, 1, 0)
-        convertMatrix[,5] = c(1, -1, -1, 1)
-      }
+      #from C22 we will calculate the covariance matrix between (gamma_0, DE.0, IE.1, IE0, and IE.1-IE.0)
+      convertMatrix = matrix(0, nG, nG+2)  
+      convertMatrix[,1] = c(1, 0, 0, 0)
+      convertMatrix[,2] = c(-1, 0, 1, 0)
+      convertMatrix[,3] = c(0, 0, -1, 1)
+      convertMatrix[,4] = c(-1, 1, 0, 0)
+      convertMatrix[,5] = c(0, -1, 0, 1)
+      convertMatrix[,6] = c(1, -1, -1, 1)
       
       gammaCov = t(convertMatrix)%*%C22%*%convertMatrix
       gammaSE = sqrt(diag(gammaCov))
@@ -514,21 +341,13 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
         C33 = CMatrix[(2*nM+nG+1):(2*nM+nG+nP), (2*nM+nG+1):(2*nM+nG+nP)]
         lamdaCov = C33
         if(nP > 1) lamdaSE = sqrt(diag(lamdaCov)) else lamdaSE = sqrt(lamdaCov)
-        coefValue = c(beta[1:nG], beta[3]-beta[4], beta[(nG+1):(nG+nP)])  
+        coefValue = c(beta[1:nG], beta[2] + (beta[3] - beta[4]), beta[3]-beta[4], beta[(nG+1):(nG+nP)])  
         coefSE = c(gammaSE, lamdaSE)
-        if(decomposition == 1){
-          resultLabel = c("Gamma.0", "Natural Direct Effect", "Natural Indirect Effect", "Pure Indirect Effect", "T-by-M Interaction Effect", outcome_x) 
-        } else{
-          resultLabel = c("Gamma.0", "Pure Indirect Effect", "Total Direct Effect", "Natural Direct Effect", "T-by-M Interaction Effect", outcome_x)
-        }
+        resultLabel = c("Gamma.0", "Natural Direct Effect", "Natural Indirect Effect", "Pure Indirect Effect", "Total Direct Effect", "T-by-M Interaction Effect", outcome_x) 
       } else {    
-        coefValue = c(beta[1:nG], beta[3]-beta[4])
+        coefValue = c(beta[1:nG], beta[2] + (beta[3] - beta[4]), beta[3]-beta[4])
         coefSE = gammaSE
-        if(decomposition == 1){
-          resultLabel = c("Gamma.0", "Natural Direct Effect", "Natural Indirect Effect", "Pure Indirect Effect", "T-by-M Interaction Effect") 
-        } else{
-          resultLabel = c("Gamma.0", "Pure Indirect Effect", "Total Direct Effect", "Natural Direct Effect", "T-by-M Interaction Effect")
-        }
+        resultLabel = c("Gamma.0", "Natural Direct Effect", "Natural Indirect Effect", "Pure Indirect Effect", "Total Direct Effect", "T-by-M Interaction Effect") 
       }
       
       result = list(coefValue=coefValue, coefSE=coefSE, resultLabel=resultLabel)
@@ -536,13 +355,13 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
     }
     
     propensity_yx = c(mediator, propensity_x) #response and covariates for propensity score models
-    rmpw_list = weight1(data, treatment, propensity_yx, decomposition)
+    rmpw_list = weight_disc(data, treatment, propensity_yx)
     data_nodup = rmpw_list$data_nodup
     data_dup = rmpw_list$data_dup
     
     outcome_yx = c(outcome, treatment, "d1_rmpw", "d0_rmpw");
     outcome_yx = c(outcome_yx, outcome_x)
-    result_now = est_rmpw(data_dup, data_nodup, treatment, outcome_yx, propensity_yx, decomposition)
+    result_now = est_rmpw(data_dup, data_nodup, treatment, outcome_yx, propensity_yx)
     result = t(rbind(result_now$coefValue, result_now$coefSE))
     z = result[, 1]/result[, 2]
     p = NULL
@@ -556,13 +375,115 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
     sig[p > 0.001 & p <= 0.01] = "*"
     sig[p > 0.01 & p <= 0.05] = "."
     sig[p > 0.05] = ""
-    result = cbind(result, sig)
-    result = as.data.frame(result)
-    rownames(result) <- result_now$resultLabel
-    colnames(result) <- c("Estimate", "Std.Error", "t value", "Pr(>|t|)", "")
+    results = cbind(result, sig)
+    results = as.data.frame(results)
+    rownames(results) <- result_now$resultLabel
+    rownames(results)[1] = "Intercept"
+    colnames(results) <- c("Estimate", "Std.Error", "t value", "Pr(>|t|)", "")
+  } else {
+    weight = function(m, t, X, t.rand = TRUE, m.scale, data){
+      if (length(unique(data[, m])) > 2 && m.scale == "discrete") {
+        m.term = paste0("as.factor(", m, ")")
+      } else {
+        m.term = m
+      }
+      formula = as.formula(paste(t, "~", paste(c(m.term, X), collapse="+")))
+      l = glm(formula, data = data, family = binomial)
+      data$p1 = fitted(l) # returns Pr(t=1|M=m, X)
+      data$p0 = 1 - data$p1 # returns Pr(t=0|M=m, X)    
+      p1 = (sum(data[, t] == 1)/nrow(data))    
+      # returns the probability of being assigned to the treatment group, Pr(t=1)
+      p0 = 1 - p1 # returns Pr(t=0)
+      data$rmpw1 = data$p0/data$p1 * p1/p0
+      data$rmpw1[data[, t] == 0] = 1
+      data$rmpw0 = data$p1/data$p0 * p0/p1
+      data$rmpw0[data[, t] == 1] = 1
+      
+      data$iptw = 1 
+      if(t.rand == FALSE){
+        formula_x = as.formula(paste(t, "~", paste(X, collapse="+"))) 
+        l_x = glm(formula_x, data = data, family = binomial)
+        p1_x = fitted(l_x) # returns the conditional probability of being assigned to the treatment group 
+        p0_x = 1 - p1_x # returns Pr(t=0|X) 
+        iptw1 = (sum(data[, t] == 1)/nrow(data))/p1_x 
+        # returns the IPTW weight for the treatment group, Pr(t=1)/Pr(t=1|X) 
+        iptw0 = (sum(data[, t] == 0)/nrow(data))/p0_x 
+        # returns the IPTW weight for the control group, Pr(t=0)/Pr(t=0|X) 
+        data$iptw[data[, t] == 1] = iptw1[data[, t] == 1] 
+        data$iptw[data[, t] == 0] = iptw0[data[, t] == 0]
+        data$rmpw1 = iptw1 * (data$rmpw1/(p1/p0) * (p1_x/p0_x))
+        data$rmpw1[data[, t] == 0] = iptw0[data[, t] == 0]
+        data$rmpw0 = iptw0 * (data$rmpw0/(p0/p1) * (p0_x/p1_x))
+        data$rmpw0[data[, t] == 1] = iptw1[data[, t] == 1]
+        # The new weight is a product of the RMPW weight estimated above and the IPTW weight, 
+        # which incorporates the covariates that confound the treatment-mediator or 
+        # treatment-outcome relationships.
+      }
+      
+      return(data)
+    }
+    
+    est = function(data, i) {
+      data.boot = data[i,]
+      data = weight(m = mediator, t = treatment, X = propensity_x,
+             t.rand = t.rand, m.scale = m.scale, data = data.boot)
+      
+      d0 = data
+      d0$D1 = 0
+      d0$D0 = 0
+      d0$w  = d0$rmpw1
+      
+      d1 = data
+      d1$D1 = as.integer(d1[[treatment]] == 1)
+      d1$D0 = as.integer(d1[[treatment]] == 0)
+      d1$w  = d1$rmpw0
+      
+      dup = rbind(d0, d1)
+      
+      fit = lm(as.formula(paste(outcome, "~", treatment, "+ D1 + D0 +",
+                                paste(outcome_x, collapse = "+"))),
+               data = dup, weights = dup$w)
+      
+      b    = coef(fit)
+      keep = setdiff(names(b), c("(Intercept)", treatment, "D1", "D0"))
+      if (anyNA(b)) return(rep(NA_real_, 6 + length(keep)))
+      
+      bT  = b[[treatment]]
+      b1  = b[["D1"]]
+      b0  = b[["D0"]]
+      
+      out = c(b[["(Intercept)"]],   # Gamma.0        = Gamma(0)
+              bT,                   # NDE  = DE.0    = Gamma(DE)
+              b1,                   # NIE  = IE.1    = Gamma(IE.1)
+              b0,                   # PIE  = IE.0    = Gamma(IE.0)
+              bT + b1 - b0,         # TDE  = DE.1
+              b1 - b0,              # T-by-M         = Gamma(IE.1) - Gamma(IE.0)
+              b[keep])
+      names(out) = c("Gamma.0", "Natural Direct Effect", "Natural Indirect Effect",
+                     "Pure Indirect Effect", "Total Direct Effect",
+                     "T-by-M Interaction Effect", keep)
+      
+      return(out)
+    }
+    
+    boot.result = boot(data, est, R = 1000)
+    
+    results = t(sapply(seq_along(boot.result$t0), function(k) {
+      bk = boot.result$t[, k]
+      c(boot.result$t0[[k]],
+        sd(bk, na.rm = TRUE),
+        quantile(bk, 0.025, na.rm = TRUE, names = FALSE),
+        quantile(bk, 0.975, na.rm = TRUE, names = FALSE))
+    }))
+    
+    results = round(results, 4)
+    colnames(results) = c("Estimate", "Std.Error",
+                          "95% CI lower bound", "95% CI upper bound")
+    rownames(results) = names(boot.result$t0)
+    rownames(results)[1] = "Intercept"
   }
   
-  return(result)
+  return(results)
 }
 
 
@@ -593,8 +514,10 @@ rmpw = function(data, treatment, mediator, outcome, propensity_x, outcome_x, dec
 #' @importFrom MASS polr
 #' @importFrom gtools combinations
 #' @examples 
+#' \donttest{
 #' data(Riverside)
 #' omit.bias = sensitivity(est.ie = -0.111, est.de = 0.158, est.se.ie = 0.059, est.se.de = 0.108, outcome = "trunc_dep12sm2", mediator = "emp", treatment = "treat", X = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), X.omit.pre = c("AFDC3660", "pqtrunc25", "nohsdip"), X.omit.post = "AFDC0_Y1", m.scale = "discrete", t.rand = TRUE, t.confound = FALSE, data = Riverside)
+#' }
 
 sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, treatment, X, X.omit.pre = NULL, X.omit.post = NULL, X.unmeasure.pre = NULL, m.scale, t.rand = TRUE, t.confound = FALSE, data){
   m = mediator
@@ -654,7 +577,7 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
     data = data[, colnames(unique(as.matrix(data), MARGIN = 2))]
   }
   
-  weight = function(m, z, X, X.omit.pre = NULL, X.omit.post = NULL, m.scale, z.rand = TRUE, z.confound = FALSE, data){
+  weight_sens = function(m, z, X, X.omit.pre = NULL, X.omit.post = NULL, m.scale, z.rand = TRUE, z.confound = FALSE, data){
     # If an omitted covariate is specified, we combine this covariate and other observed  
     # pretreatment covariates in estimating a new weight for sensitivity analysis. 
     X.all = c(X, X.omit.pre, X.omit.post)
@@ -677,29 +600,29 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
       data$rmpw[data[, z] == 1 & data[, m] == 0] = ((1 - data$p0)/(1 - data$p1))[data[, z] == 1 & data[, m] == 0]
       data$rmpw[data[, z] == 0] = 1
       # returns the RMPW weight
-    }
+    } else {
     
-    # For a multicategorical mediator
-    if(m.scale == "discrete" & length(unique(data[, m])) > 2){
-      formula = as.formula(paste(m, "~", paste(X.all, collapse="+")))
-      data[, m] = as.factor(data[, m])
-      data1 = data[which(data[, z] ==1), ]
-      data0 = data[which(data[, z] ==0), ]
-      l1 = polr(formula, data = data1)
-      l0 = polr(formula, data = data0)
-      data$p1 = predict(l1, data, type = "p")
-      # returns the probability of mediator being m under the treatment condition conditional on 
-      # all the covariates, Pr(M=m|Z=1, X.all=x)
-      data$p0 = predict(l0, data, type = "p") # returns Pr(M=m|Z=0, X.all=x)
-      for(k in unique(data[, m])){
-        data$rmpw[data[, z] == 1 & data[, m] == k] = (data$p0[, k]/ data$p1[, k])[data[, z] == 1 & data[, m] == k]
-      }
-      data$rmpw[data[, z] == 0] = 1
-      # returns the RMPW weight
-    }
-    
-    # For a continuous mediator
-    if(m.scale == "continuous"){
+    # # For a multicategorical mediator
+    # if(m.scale == "discrete" & length(unique(data[, m])) > 2){
+    #   formula = as.formula(paste(m, "~", paste(X.all, collapse="+")))
+    #   data[, m] = as.factor(data[, m])
+    #   data1 = data[which(data[, z] ==1), ]
+    #   data0 = data[which(data[, z] ==0), ]
+    #   l1 = polr(formula, data = data1)
+    #   l0 = polr(formula, data = data0)
+    #   data$p1 = predict(l1, data, type = "p")
+    #   # returns the probability of mediator being m under the treatment condition conditional on 
+    #   # all the covariates, Pr(M=m|Z=1, X.all=x)
+    #   data$p0 = predict(l0, data, type = "p") # returns Pr(M=m|Z=0, X.all=x)
+    #   for(k in unique(data[, m])){
+    #     data$rmpw[data[, z] == 1 & data[, m] == k] = (data$p0[, k]/ data$p1[, k])[data[, z] == 1 & data[, m] == k]
+    #   }
+    #   data$rmpw[data[, z] == 0] = 1
+    #   # returns the RMPW weight
+    # }
+    # 
+    # # For a continuous mediator
+    # if(m.scale == "continuous"){
       formula = as.formula(paste(z, "~", paste(c(m, X.all), collapse="+")))
       l = glm(formula, data = data, family = binomial)
       data$p1 = fitted(l) # returns Pr(Z=1|M=m, X.all=x)
@@ -721,7 +644,7 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
     if(z.rand == FALSE){
       # The RMPW for a continuous mediator needs to be revised by replacing (p1/p0) with 
       # (p1_x/p0_x), the latter being a function of X.all.
-      if(m.scale == "continuous"){
+      if(m.scale == "continuous"|m.scale == "discrete" & length(unique(data[, m])) > 2){
         formula_x = as.formula(paste(z, "~", paste(X.all, collapse="+"))) 
         l_x = glm(formula_x, data = data, family = binomial)
         p1_x = fitted(l_x)
@@ -768,8 +691,8 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
   }
   
   bias = function(data.full.weight, data.omit.weight, est.ie, est.de, est.se.ie, est.se.de, y, m, z, X, z.confound = FALSE, data){
-    # data.full.weight: the output of weight() that incorporates all the covariates
-    # data.omit.weight: the output of weight() that omits some covariates
+    # data.full.weight: the output of weight_sens() that incorporates all the covariates
+    # data.omit.weight: the output of weight_sens() that omits some covariates
     # Note: The computation of bias depends on whether there are omitted confounders for the
     # treatment assignment 
     
@@ -849,10 +772,10 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
   names = NULL
   if(!is.null(X.unmeasure.pre)){
     for(i in 1:length(X.unmeasure.pre)){
-      data.full.weight = weight(m = m, z = z, X = X, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
+      data.full.weight = weight_sens(m = m, z = z, X = X, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
       # analysis involving an observed pretreatment confounder to which an unmeasured 
       # confounder is comparable
-      data.omit.weight = weight(m = m, z = z, X = X[-which(X%in%X.unmeasure.pre[i])], m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
+      data.omit.weight = weight_sens(m = m, z = z, X = X[-which(X%in%X.unmeasure.pre[i])], m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
       # analysis without the observed pretreatment confounder to which an unmeasured confounder is 
       # comparable
       unmeasure.bias = rbind(unmeasure.bias, bias(data.full.weight, data.omit.weight, est.ie, est.de, est.se.ie, est.se.de, y, m, z, X, z.confound, data))
@@ -884,8 +807,8 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
         if(all(unique(X.omit.i %in% X.omit.post) == F))
           X.omit.post.i = NULL
         
-        data.omit.weight = weight(m = m, z = z, X = X, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) # original analysis
-        data.full.weight = weight(m = m, z = z, X = X, X.omit.pre = X.omit.pre.i, X.omit.post = X.omit.post.i, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
+        data.omit.weight = weight_sens(m = m, z = z, X = X, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) # original analysis
+        data.full.weight = weight_sens(m = m, z = z, X = X, X.omit.pre = X.omit.pre.i, X.omit.post = X.omit.post.i, m.scale = m.scale, z.rand = z.rand, z.confound = z.confound, data = data) 
         # analysis adjusting for omitted confounders
         
         omit.bias = rbind(omit.bias, bias(data.full.weight, data.omit.weight, est.ie, est.de, est.se.ie, est.se.de, y, m, z, X, z.confound, data))
@@ -926,10 +849,12 @@ sensitivity = function(est.ie, est.de, est.se.ie, est.se.de, outcome, mediator, 
 #' @export
 #' @importFrom graphics abline contour plot
 #' @examples 
+#' \donttest{
 #' data(Riverside)
 #' omit.bias = sensitivity(est.ie = -0.111, est.de = 0.158, est.se.ie = 0.059, est.se.de = 0.108, outcome = "trunc_dep12sm2", mediator = "emp", treatment = "treat", X = c("emp_prior", "pqtrunc50", "pqtrunc51", "pqtrunc52", "pqtrunc53", "pqtrunc30", "hispanic", "pqtrunc49", "nevmar"), X.omit.pre = c("AFDC3660", "pqtrunc25", "nohsdip"), X.omit.post = "AFDC0_Y1", m.scale = "discrete", t.rand = TRUE, t.confound = FALSE, data = Riverside)
 #' sensitivity.plot(est.ie = -0.111, est.de = 0.158, est.se.ie = 0.059, est.se.de = 0.108, X.omit.bias = omit.bias, effect = "NIE", type = "omitted")
 #' sensitivity.plot(est.ie = -0.111, est.de = 0.158, est.se.ie = 0.059, est.se.de = 0.108, X.omit.bias = omit.bias, effect = "NDE", type = "omitted")
+#' }
  
 sensitivity.plot = function(est.ie, est.de, est.se.ie, est.se.de, X.omit.bias, effect, type){
   if(is.null(dim(X.omit.bias))){

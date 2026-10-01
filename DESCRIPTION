@@ -1,6 +1,6 @@
 Package: rmpw
-Version: 0.0.6
-Date: 2025-11-14
+Version: 0.0.7
+Date: 2026-09-30
 Title: Causal Mediation Analysis Using Weighting Approach
 Maintainer: Xu Qin <xuqin@uchicago.edu>
 Authors@R: c(person(given = "Xu",
@@ -13,14 +13,14 @@ Authors@R: c(person(given = "Xu",
                person(given = "Fan",
                       family = "Yang",
                       role = "aut"))
-Depends: R (>= 3.3.0), gtools, MASS
+Depends: R (>= 3.5.0), gtools, MASS, boot
 Description: We implement causal mediation analysis using the methods proposed by Hong (2010) and Hong, Deutsch & Hill (2015) <doi:10.3102/1076998615583902>. It allows the estimation and hypothesis testing of causal mediation effects through ratio of mediator probability weights (RMPW). This strategy conveniently relaxes the assumption of no treatment-by-mediator interaction while greatly simplifying the outcome model specification without invoking strong distributional assumptions. We also implement a sensitivity analysis by extending the RMPW method to assess potential bias in the presence of omitted pretreatment or posttreatment covariates. The sensitivity analysis strategy was proposed by Hong, Qin, and Yang (2018) <doi:10.3102/1076998617749561>.
 License: GPL-2
-RoxygenNote: 7.3.3
+Config/roxygen2/version: 8.1.0
 NeedsCompilation: no
-Packaged: 2025-11-17 15:54:34 UTC; XUQIN
+Packaged: 2026-10-01 02:35:09 UTC; XUQIN
 Author: Xu Qin [aut, cre],
   Guanglei Hong [aut],
   Fan Yang [aut]
 Repository: CRAN
-Date/Publication: 2025-11-17 16:10:02 UTC
+Date/Publication: 2026-10-01 08:40:21 UTC
